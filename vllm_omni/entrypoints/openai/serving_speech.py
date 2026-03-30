@@ -180,7 +180,8 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         self.supported_speakers.update(self.uploaded_speakers.keys())
         self._tts_tokenizer = None
 
-        logger.info(f"Loaded {len(self.supported_speakers)} supported speakers: {sorted(self.supported_speakers)}")
+        logger.info(f"Loaded {len(self.supported_speakers)} supported speakers from metadata.json: {sorted(self.supported_speakers)}")
+        logger.info(f"Speakers:\n{self.supported_speakers}")
         logger.info(f"Loaded {len(self.uploaded_speakers)} uploaded speakers")
 
         # Batch configuration
@@ -1238,11 +1239,15 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             model_type = tts_params.get("task_type", ["unknown"])[0]
         else:
             model_type = "generic"
+            
         logger.info(
-            "TTS speech request %s: text=%r, model=%s",
+            "TTS speech request %s: text=%r, model=%s, stream=%s, ref_text=%s, x_vector=%s",
             request_id,
             request.input[:50] + "..." if len(request.input) > 50 else request.input,
             model_type,
+            tts_params.get('stream', None),
+            tts_params.get('ref_text')[0][:10] if tts_params.get('ref_text') else None,
+            tts_params.get('x_vector_only_mode', None),
         )
 
         sampling_params_list = self.engine_client.default_sampling_params_list

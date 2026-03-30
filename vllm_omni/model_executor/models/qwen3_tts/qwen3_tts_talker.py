@@ -7,6 +7,7 @@ import os
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 from urllib.parse import urlparse
+import hashlib
 
 import numpy as np
 import soundfile as sf
@@ -1325,6 +1326,40 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
             # Base supports voice clone prompt with in-context mode.
             xvec_only = bool((info_dict.get("x_vector_only_mode") or [False])[0])
             in_context_mode = not xvec_only
+
+            # PATCH MOKS
+            # создаем спейсы для кэша по хэшу
+            if not hasattr(self, "_lru_spk_cache"):
+                self._lru_spk_cache = {}
+                self._lru_spk_keys = []
+        
+            cache_key = None
+            ref_audio_list = info_dict.get("ref_audio")
+            ref_text_raw = _as_singleton(info_dict.get("ref_text"))
+
+            if in_context_mode and ref_audio_list and ref_text_raw:
+                audio_snippet = str(ref_audio_list[0][0][:20]) 
+                hash_input = f"{ref_text_raw}_{audio_snippet}".encode('utf-8')
+                cache_key = hashlib.md5(hash_input).hexdigest()
+
+                if cache_key in self._lru_spk_cache:
+                    logger.info(f"MKS|TALKER|BUILDPROMPT| HIT CACHE for speaker! Key: {cache_key[:8]}")
+                    c_data = self._lru_spk_cache[cache_key]
+                    
+                    # подсовываем закэшированные тензоры в info_dict!
+                    # дальнейший оригинальный код увидит их и ПРОПУСТИТ тяжелое извлечение
+                    vcp = _normalize_voice_clone_prompt(info_dict.get("voice_clone_prompt")) or {}
+                    vcp["ref_code"] = c_data["ref_code"].clone() if isinstance(c_data["ref_code"], torch.Tensor) else c_data["ref_code"]                # ref_code with tokenizer from ref_audio
+                    vcp["ref_spk_embedding"] = c_data["speaker_embed"].clone() if isinstance(c_data["speaker_embed"], torch.Tensor) else c_data["speaker_embed"]  # Speaker embedding with ecapa
+                    info_dict["voice_clone_prompt"] = [vcp]
+                    info_dict["ref_ids"] = [c_data["ref_ids"].clone() if isinstance(c_data["ref_ids"], torch.Tensor) else c_data["ref_ids"]]          # ref_text embedd
+                    
+                    # обновляем LRU (перемещаем ключ в конец, чтобы удалять ниже последние использованные)
+                    self._lru_spk_keys.remove(cache_key)
+                    self._lru_spk_keys.append(cache_key)
+                else:
+                    logger.info(f"MKS|TALKER|BUILDPROMPT| MISS CACHE, going to compute. Key: {cache_key[:8]}")
+
             voice_clone_prompt = _normalize_voice_clone_prompt(info_dict.get("voice_clone_prompt"))
             # Official implementation may pass `voice_clone_prompt.icl_mode`.
             if voice_clone_prompt is not None and "icl_mode" in voice_clone_prompt:
@@ -1398,6 +1433,23 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
                     ref_ids = tok(self._build_ref_text(ref_text), return_tensors="pt", padding=False)["input_ids"].to(
                         device=input_ids.device
                     )
+
+                    # PATCH MOKS
+                    if cache_key and cache_key not in self._lru_spk_cache:
+                        logger.info(f"MKS|TALKER| SAVING TO CACHE! Key: {cache_key[:8]}")
+                        self._lru_spk_cache[cache_key] = {
+                            "ref_code": ref_code_t,            # Готовые аудио-коды (SpeechTokenizer)
+                            "speaker_embed": speaker_embed,    # Готовый эмбеддинг спикера
+                            "ref_ids": ref_ids                 # Готовые токены текста
+                        }
+                        self._lru_spk_keys.append(cache_key)
+                        
+                        # очистка старых записей (максимум 20 спикеров в памяти GPU, выше последние использованные перемещаются в конец)
+                        if len(self._lru_spk_keys) > 20:
+                            old_key = self._lru_spk_keys.pop(0)
+                            del self._lru_spk_cache[old_key]
+                            logger.info(f"MKS|TALKER| Evicted old cache key: {old_key[:8]}")
+
                 icl_input_embed, trailing_text_hidden = self._generate_icl_prompt(
                     text_id=input_ids[:, 3:-5],
                     ref_id=ref_ids[:, 3:-2],
