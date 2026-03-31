@@ -1343,7 +1343,7 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
                 cache_key = hashlib.md5(hash_input).hexdigest()
 
                 if cache_key in self._lru_spk_cache:
-                    logger.info(f"MKS|TALKER|BUILDPROMPT| HIT CACHE for speaker! Key: {cache_key[:8]}")
+                    # logger.info(f"MKS|TALKER|BUILDPROMPT| HIT CACHE for speaker! Key: {cache_key[:8]}")
                     c_data = self._lru_spk_cache[cache_key]
                     
                     # подсовываем закэшированные тензоры в info_dict!
@@ -1357,8 +1357,8 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
                     # обновляем LRU (перемещаем ключ в конец, чтобы удалять ниже последние использованные)
                     self._lru_spk_keys.remove(cache_key)
                     self._lru_spk_keys.append(cache_key)
-                else:
-                    logger.info(f"MKS|TALKER|BUILDPROMPT| MISS CACHE, going to compute. Key: {cache_key[:8]}")
+                # else:
+                    # logger.info(f"MKS|TALKER|BUILDPROMPT| MISS CACHE, going to compute. Key: {cache_key[:8]}")
 
             voice_clone_prompt = _normalize_voice_clone_prompt(info_dict.get("voice_clone_prompt"))
             # Official implementation may pass `voice_clone_prompt.icl_mode`.
@@ -1436,7 +1436,7 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
 
                     # PATCH MOKS
                     if cache_key and cache_key not in self._lru_spk_cache:
-                        logger.info(f"MKS|TALKER| SAVING TO CACHE! Key: {cache_key[:8]}")
+                        # logger.info(f"MKS|TALKER| SAVING TO CACHE! Key: {cache_key[:8]}")
                         self._lru_spk_cache[cache_key] = {
                             "ref_code": ref_code_t,            # Готовые аудио-коды (SpeechTokenizer)
                             "speaker_embed": speaker_embed,    # Готовый эмбеддинг спикера
@@ -1448,7 +1448,7 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
                         if len(self._lru_spk_keys) > 20:
                             old_key = self._lru_spk_keys.pop(0)
                             del self._lru_spk_cache[old_key]
-                            logger.info(f"MKS|TALKER| Evicted old cache key: {old_key[:8]}")
+                            # logger.info(f"MKS|TALKER| Evicted old cache key: {old_key[:8]}")
 
                 icl_input_embed, trailing_text_hidden = self._generate_icl_prompt(
                     text_id=input_ids[:, 3:-5],
