@@ -180,6 +180,17 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         self.uploaded_speakers_dir = Path(speech_voice_samples_dir)
         self.uploaded_speakers_dir.mkdir(parents=True, exist_ok=True)
 
+        self.uploaded_speakers: dict[str, dict] = {}
+        self.metadata_file = self.uploaded_speakers_dir / "metadata.json"
+        if self.metadata_file.exists():
+            try:
+                with open(self.metadata_file) as f:
+                    spk_dict = json.load(f)
+                    self.uploaded_speakers = spk_dict.get("uploaded_speakers", {})
+            except Exception as e:
+                logger.error(f"Failed to load metadata from {self.metadata_file}: {e}")
+                self.uploaded_speakers = {}
+
         # Find and cache the TTS stage (if any) during initialization
         self._tts_stage = self._find_tts_stage()
         self._is_tts = self._tts_stage is not None
@@ -204,16 +215,15 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
         # Load supported speakers (built-in only; uploaded voices start empty)
         self.supported_speakers = self._load_supported_speakers()
-        self.uploaded_speakers: dict[str, dict] = {}
+
         logger.warning(
             "Uploaded voices are ephemeral and will be lost on server restart. "
             "Re-upload voices after each restart if needed."
         )
         self._tts_tokenizer = None
 
-        logger.info(f"Loaded {len(self.supported_speakers)} supported speakers from metadata.json: {sorted(self.supported_speakers)}")
-        logger.info(f"Speakers:\n{self.supported_speakers}")
-        logger.info(f"Loaded {len(self.uploaded_speakers)} uploaded speakers")
+        logger.info(f"Loaded '{len(self.uploaded_speakers)}' uploaded speakers from metadata.json: {sorted(self.uploaded_speakers)}")
+        logger.info(f"Supported speakers:\n{self.supported_speakers}")
 
         # Batch configuration
         self._batch_max_items: int = getattr(self.engine_client, "tts_batch_max_items", 32)
